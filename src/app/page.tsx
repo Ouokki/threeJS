@@ -1,25 +1,30 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import BackgroundScene from "@/components/BackgroundScene";
 
 export default function HomePage() {
+  const [activeSection, setActiveSection] = useState(0);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const idx = Math.round(window.scrollY / window.innerHeight);
+      setActiveSection(idx);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   return (
     <>
       {/* Fixed 3D background */}
-      <BackgroundScene />
+      <BackgroundScene activeSection={activeSection} />
 
-      {/* Optional: soft overlay for readability */}
+      {/* Optional overlay for contrast */}
       <div className="pointer-events-none fixed inset-0 -z-0 bg-gradient-to-b from-black/30 via-black/20 to-black/30" />
 
-      {/* Foreground content that scrolls */}
-      <main
-        className="
-          relative z-10
-          scroll-smooth
-          sm:scroll-pt-16
-          snap-y snap-mandatory
-        "
-      >
+      {/* Foreground content */}
+      <main className="relative z-10 scroll-smooth sm:scroll-pt-16 snap-y snap-mandatory">
         {/* Section 1 */}
         <section className="min-h-screen snap-start flex items-center">
           <div className="mx-auto max-w-3xl px-6 text-white">
@@ -30,7 +35,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Section 2 */}
+        {/* Section 2 → triggers morph */}
         <section className="min-h-screen snap-start flex items-center">
           <div className="mx-auto max-w-3xl px-6 text-white">
             <h2 className="text-3xl font-semibold">What we do</h2>
@@ -54,9 +59,7 @@ export default function HomePage() {
         <section className="min-h-screen snap-start flex items-center">
           <div className="mx-auto max-w-3xl px-6 text-white">
             <h2 className="text-3xl font-semibold">Process</h2>
-            <p className="mt-4 opacity-90">
-              Strategy → Concept → Prototype → Polish → Ship → Measure.
-            </p>
+            <p className="mt-4 opacity-90">Strategy → Concept → Prototype → Polish → Ship → Measure.</p>
           </div>
         </section>
 
@@ -64,9 +67,7 @@ export default function HomePage() {
         <section className="min-h-screen snap-start flex items-center">
           <div className="mx-auto max-w-3xl px-6 text-white">
             <h2 className="text-3xl font-semibold">Contact</h2>
-            <p className="mt-4 opacity-90">
-              Let’s build something memorable together.
-            </p>
+            <p className="mt-4 opacity-90">Let’s build something memorable together.</p>
           </div>
         </section>
       </main>

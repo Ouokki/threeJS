@@ -5,40 +5,37 @@ import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 
 /**
- * Infinite triangle tunnel that MORPHS into a crisp triangle logo
- * at mid-scroll, then returns to the tunnel, with subtle scroll parallax.
+ * Infinite triangle tunnel that morphs into a crisp triangle logo
+ * when the page is on Section 2. Smooth damping, parallax & mouse tilt.
  */
 
-const COUNT = 240;          // instances
-const DEPTH = 120;          // tunnel length
+const COUNT = 240; // instances
+const DEPTH = 120; // tunnel length
 const COLOR = 0x82d1ff;
 const OPACITY = 0.18;
 
-// Morph window (fraction of total scroll range we normalize to below)
-const MORPH_IN_START = 0.30;
-const MORPH_IN_END   = 0.40;  // 0 -> 1 progress here
-const HOLD_END       = 0.48;  // hold at 1 here
-const MORPH_OUT_END  = 0.60;  // 1 -> 0 back to tunnel
-
-// triangle logo size & z when displayed
 const LOGO_EDGE = 6.2;
 const LOGO_Z = -6;
 
-// Equilateral triangle geometry (wireframe look)
+// helper: critically-damped interpolation (stable across dt)
+const damp = (a: number, b: number, lambda: number, dt: number) =>
+  THREE.MathUtils.lerp(a, b, 1 - Math.exp(-lambda * dt));
+
+// Equilateral triangle (single face)
 function makeTriangle(): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   const h = Math.sqrt(3) / 2;
   const verts = new Float32Array([
-    0,    2 * h / 3, 0,
-   -0.5, -h / 3,     0,
-    0.5, -h / 3,     0
+    0, 2 * h / 3, 0,
+    -0.5, -h / 3, 0,
+    0.5, -h / 3, 0,
   ]);
   g.setAttribute("position", new THREE.BufferAttribute(verts, 3));
   g.computeVertexNormals();
   return g;
 }
 
-// Fill an equilateral triangle uniformly with points (no jitter for crisp shape)
+// Uniformly fill an equilateral triangle (for logo targets)
 function logoTriangleTargets(count: number, edge: number) {
   const pts: THREE.Vector3[] = [];
   const h = Math.sqrt(3) * edge / 2;
@@ -60,25 +57,7 @@ function logoTriangleTargets(count: number, edge: number) {
   return pts;
 }
 
-// smoothstep helper
-const smooth = (t: number) => t * t * (3 - 2 * t);
-
-// Map scrollNorm (0..1) to morph progress 0..1..0 with hold at 1
-function morphProgress(scrollNorm: number) {
-  if (scrollNorm <= MORPH_IN_START) return 0;
-  if (scrollNorm < MORPH_IN_END) {
-    const t = (scrollNorm - MORPH_IN_START) / (MORPH_IN_END - MORPH_IN_START);
-    return smooth(THREE.MathUtils.clamp(t, 0, 1)); // 0 -> 1
-  }
-  if (scrollNorm < HOLD_END) return 1;              // hold
-  if (scrollNorm < MORPH_OUT_END) {
-    const t = (scrollNorm - HOLD_END) / (MORPH_OUT_END - HOLD_END);
-    return smooth(1 - THREE.MathUtils.clamp(t, 0, 1)); // 1 -> 0
-  }
-  return 0;
-}
-
-export default function TriangleTunnel() {
+export default function TriangleTunnel({ activeSection = 0 }: { activeSection?: number }) {
   const inst = useRef<THREE.InstancedMesh>(null!);
   const group = useRef<THREE.Group>(null!);
 
@@ -106,11 +85,11 @@ export default function TriangleTunnel() {
     }
   }, [positions, scales, rots]);
 
-  // inputs: scroll + mouse (use refs to avoid stale closures)
+  // inputs: scroll + mouse (refs to avoid stale closures)
   const scrollRef = useRef(0);
   const winHRef = useRef<number>(typeof window !== "undefined" ? window.innerHeight : 1);
   const winWRef = useRef<number>(typeof window !== "undefined" ? window.innerWidth : 1);
-  
+
   useEffect(() => {
     const onScroll = () => (scrollRef.current = window.scrollY);
     const onResize = () => {
@@ -135,15 +114,22 @@ export default function TriangleTunnel() {
     return () => window.removeEventListener("pointermove", onMove);
   }, []);
 
-  useFrame((state, dt) => {
-    // normalize scroll across ~2 screens for nicer range
-    const scrollNorm = Math.min(1, Math.max(0, scrollRef.current / (winHRef.current * 2)));
-    const m = morphProgress(scrollNorm); // 0..1..0 morph
+  // accumulate morph progress smoothly (0..1)
+  const mRef = useRef(0);
 
-    // --- Subtle parallax (depth/vertical/rotation) tied to scroll ---
-    const targetZ = THREE.MathUtils.lerp(-2, -4.5, scrollNorm);  // deeper as you scroll
-    const targetY = THREE.MathUtils.lerp( 0, -0.6, scrollNorm);  // slight vertical drift
-    const parallaxRz = THREE.MathUtils.lerp(0, 0.15, scrollNorm); // tiny spin with scroll
+  useFrame((_, dt) => {
+    // normalize scroll for parallax/speed only (no longer drives morph)
+    const scrollNorm = Math.min(1, Math.max(0, scrollRef.current / (winHRef.current * 2)));
+
+    // Section-driven morph: section 2 => 1, else => 0
+    const targetM = activeSection === 1 ? 1 : 0;
+    mRef.current = damp(mRef.current, targetM, 4, dt);
+    const m = mRef.current;
+
+    // Subtle parallax (depth/vertical/rotation) tied to scroll
+    const targetZ = THREE.MathUtils.lerp(-2, -4.5, scrollNorm);
+    const targetY = THREE.MathUtils.lerp(0, -0.6, scrollNorm);
+    const parallaxRz = THREE.MathUtils.lerp(0, 0.15, scrollNorm);
 
     group.current.position.z = THREE.MathUtils.lerp(group.current.position.z, targetZ, 0.08);
     group.current.position.y = THREE.MathUtils.lerp(group.current.position.y, targetY, 0.08);
@@ -153,14 +139,15 @@ export default function TriangleTunnel() {
     group.current.rotation.x = THREE.MathUtils.lerp(group.current.rotation.x, -mouse.current.y * tiltScale, 0.08);
     group.current.rotation.y = THREE.MathUtils.lerp(group.current.rotation.y,  mouse.current.x * tiltScale, 0.08);
 
-    // Combine parallax Z-rotation with a gentle idle spin (paused during morph)
-    let desiredZ = parallaxRz;
-    if (m < 0.001) desiredZ += group.current.rotation.z + dt * 0.05 - group.current.rotation.z; // add tiny spin
+    // Combine parallax Z-rotation with a gentle idle spin (reduced near full morph)
+    const spinActive = m < 0.1;
+    const desiredZ = spinActive ? group.current.rotation.z + dt * 0.05 : parallaxRz;
     group.current.rotation.z = THREE.MathUtils.lerp(group.current.rotation.z, desiredZ, 0.06);
 
-    // --- Tunnel motion, paused during morph/hold for clarity ---
+    // Tunnel motion fades as morph nears 1 (never hard stop)
     const baseSpeed = THREE.MathUtils.lerp(3.0, 10.0, scrollNorm);
-    const speed = (m > 0.001) ? 0 : baseSpeed * dt;
+    const pauseFactor = THREE.MathUtils.smoothstep(m, 0.6, 1.0); // 0 until m≈0.6 → then up to 1
+    const speed = baseSpeed * (1 - 0.9 * pauseFactor) * dt;
 
     for (let i = 0; i < COUNT; i++) {
       // Tunnel position (source)
