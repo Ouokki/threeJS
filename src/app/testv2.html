@@ -1,0 +1,179 @@
+<!-- Doc Technique – Cards fed by SharePoint List "DocTechniqueLinks" -->
+<style>
+  :root{--bg:#f7f9fb;--card:#fff;--text:#1f2937;--muted:#64748b;--brand:#1e3a8a;--brand2:#3b82f6;--border:#e5e7eb;--badge:#eef2ff;--r:12px}
+  *{box-sizing:border-box} body{background:var(--bg);color:var(--text);font-family:Segoe UI,Roboto,Arial,sans-serif}
+  .dt-wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+  .dt-head{display:flex;gap:12px;align-items:center;margin-bottom:16px}
+  .dt-logo{width:42px;height:42px;border-radius:10px;display:grid;place-items:center;color:#fff;font-weight:700;background:linear-gradient(135deg,var(--brand),var(--brand2))}
+  .dt-h1{margin:0;font-size:28px}
+  .dt-desc{margin:2px 0 0;color:var(--muted)}
+  .dt-bar{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}
+  .dt-search{flex:1 1 280px;display:flex;align-items:center;background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px 10px;gap:8px}
+  .dt-search input{border:0;outline:0;width:100%;font-size:14px;background:transparent}
+  .dt-chip{border:1px solid var(--border);background:#fff;border-radius:999px;padding:8px 12px;font-size:12px;color:var(--text);cursor:pointer}
+  .dt-chip.active{border-color:var(--brand2);background:var(--badge);color:var(--brand)}
+  .dt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+  .dt-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:16px;display:flex;gap:14px;transition:transform .12s ease,box-shadow .12s ease}
+  .dt-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(30,58,138,.08)}
+  .dt-ic{min-width:36px;height:36px;border-radius:10px;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,var(--brand2),var(--brand));font-weight:700}
+  .dt-card h3{margin:0 0 6px;font-size:16px}
+  .dt-card p{margin:0 0 10px;color:var(--muted);font-size:13px}
+  .dt-badge{background:var(--badge);color:var(--brand);border-radius:999px;padding:4px 8px;font-size:11px;margin-right:6px}
+  .dt-card a{text-decoration:none;color:var(--brand);font-weight:600}
+  .dt-empty{display:none;text-align:center;color:var(--muted);padding:20px}
+  .dt-err{display:none;text-align:center;color:#b91c1c;padding:12px;background:#fee2e2;border:1px solid #fecaca;border-radius:8px;margin:8px 0}
+  @media (prefers-color-scheme:dark){:root{--bg:#0b1020;--card:#0f172a;--text:#e5e7eb;--muted:#94a3b8;--border:#1f2a44;--badge:#0b254a}}
+</style>
+
+<div class="dt-wrap" id="dt">
+  <div class="dt-head">
+    <div class="dt-logo">DT</div>
+    <div>
+      <h1 class="dt-h1">Doc Technique</h1>
+      <p class="dt-desc">Portail des guides, procédures et références.</p>
+    </div>
+  </div>
+
+  <div class="dt-bar">
+    <label class="dt-search" aria-label="Rechercher un article">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" stroke="#64748b" stroke-width="2"></circle>
+        <path d="M20 20l-3.5-3.5" stroke="#64748b" stroke-width="2" stroke-linecap="round"></path>
+      </svg>
+      <input id="dt-q" type="search" placeholder="Rechercher un article…">
+    </label>
+    <div id="dt-filters">
+      <button class="dt-chip active" data-tag="all">Tous</button>
+    </div>
+    <a id="dt-new" class="dt-chip" href="#" style="text-decoration:none">Proposer un article</a>
+  </div>
+
+  <div id="dt-err" class="dt-err"></div>
+  <section id="dt-cards" class="dt-grid" aria-live="polite"></section>
+  <div id="dt-empty" class="dt-empty">Aucun article ne correspond à votre recherche/filtre.</div>
+</div>
+
+<script type="text/javascript">
+(function(){
+  // ====== CONFIG ======
+  var LIST_TITLE = 'DocTechniqueLinks';
+  var SITE_URL = (window._spPageContextInfo && _spPageContextInfo.webAbsoluteUrl) || '';
+  var NEW_FORM_URL = SITE_URL + '/Lists/' + encodeURIComponent(LIST_TITLE) + '/NewForm.aspx';
+
+  // ====== DOM ======
+  var q = document.getElementById('dt-q');
+  var filters = document.getElementById('dt-filters');
+  var cards = document.getElementById('dt-cards');
+  var empty = document.getElementById('dt-empty');
+  var err = document.getElementById('dt-err');
+  var newBtn = document.getElementById('dt-new'); newBtn.href = NEW_FORM_URL;
+
+  var activeTag = 'all';
+  var allTags = {};
+
+  function esc(s){return (s||'').replace(/[&<>"']/g,function(m){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])})}
+
+  function parseTags(raw){
+    // Multiple choice fields may come as array or ";#" delimited in classic
+    if(Array.isArray(raw)) return raw;
+    if(typeof raw==='string') return raw.split(';#').filter(Boolean);
+    return [];
+  }
+
+  function first3(str){ return (str||'DOC').substring(0,3).toUpperCase(); }
+
+  function renderFilters(){
+    // remove dynamic chips (keep "Tous")
+    var chips = [].slice.call(filters.querySelectorAll('.dt-chip'));
+    chips.forEach(function(c,i){ if(i>0) c.parentNode.removeChild(c); });
+    Object.keys(allTags).sort().forEach(function(t){
+      var b = document.createElement('button');
+      b.className='dt-chip'; b.dataset.tag=t; b.textContent=t;
+      b.onclick=function(){ setActiveTag(t,b); };
+      filters.appendChild(b);
+    });
+  }
+
+  function setActiveTag(tag, btn){
+    activeTag = tag;
+    [].forEach.call(filters.querySelectorAll('.dt-chip'), function(c){ c.classList.remove('active'); });
+    var allBtn = filters.querySelector('[data-tag="all"]');
+    if(tag==='all') allBtn.classList.add('active'); else btn.classList.add('active');
+    applyFilters();
+  }
+
+  function renderCards(items){
+    cards.innerHTML='';
+    items.forEach(function(it){
+      (it.tags||[]).forEach(function(t){ allTags[t]=true; });
+      var art = document.createElement('article');
+      art.className='dt-card';
+      art.setAttribute('data-tags',(it.tags||[]).join(','));
+      art.innerHTML =
+        '<div class="dt-ic">'+first3(it.tags && it.tags[0])+'</div>'+
+        '<div>'+
+          '<h3><a href="'+esc(it.url)+'">'+esc(it.title||'(Sans titre)')+'</a></h3>'+
+          '<p>'+esc(it.desc||'')+'</p>'+
+          '<div>'+ (it.tags||[]).map(function(t){return '<span class="dt-badge">'+esc(t)+'</span>';}).join('') +'</div>'+
+        '</div>';
+      cards.appendChild(art);
+    });
+  }
+
+  function applyFilters(){
+    var term = (q.value||'').toLowerCase();
+    var visible=0;
+    [].forEach.call(cards.querySelectorAll('.dt-card'), function(c){
+      var text = c.innerText.toLowerCase();
+      var tags = (c.getAttribute('data-tags')||'').split(',').map(function(s){return s.trim()});
+      var tagMatch = (activeTag==='all') || tags.indexOf(activeTag)>-1;
+      var termMatch = !term || text.indexOf(term)>-1;
+      var show = tagMatch && termMatch;
+      c.style.display = show ? '' : 'none';
+      if(show) visible++;
+    });
+    empty.style.display = visible ? 'none' : 'block';
+  }
+
+  function apiUrl(){
+    return SITE_URL + "/_api/web/lists/getbytitle('"+encodeURIComponent(LIST_TITLE)+"')/items"
+         + "?$select=Id,Title,Url,Description,Tags,Modified&$orderby=Title asc";
+  }
+
+  function normalizeItem(r){
+    var href='';
+    try{
+      if(typeof r.Url==='string'){ href = r.Url.split(',')[0].trim(); }
+      else if(r.Url && r.Url.Url){ href = r.Url.Url; }
+    }catch(e){}
+    return {
+      id: r.Id,
+      title: r.Title || '(Sans titre)',
+      url: href || '#',
+      desc: r.Description || '',
+      tags: parseTags(r.Tags),
+      modified: r.Modified
+    };
+  }
+
+  function showError(message){
+    err.style.display='block'; err.textContent=message;
+  }
+
+  // Init events
+  filters.querySelector('[data-tag="all"]').onclick=function(e){ setActiveTag('all', e.currentTarget); };
+  q.oninput = applyFilters;
+
+  // Fetch + render
+  fetch(apiUrl(), { headers:{ 'Accept':'application/json;odata=nometadata' }})
+    .then(function(res){ if(!res.ok) throw new Error('HTTP '+res.status+' – impossible de lire la liste "'+LIST_TITLE+'".'); return res.json(); })
+    .then(function(data){
+      var items = (data.value||[]).map(normalizeItem);
+      renderCards(items);
+      renderFilters();
+      applyFilters();
+    })
+    .catch(function(e){ showError('Erreur : ' + (e.message||e)); });
+
+})();
+</script>
